@@ -1,0 +1,52 @@
+import * as Jimp from 'jimp';
+import { Tensor } from 'onnxruntime-web';
+
+const DEFAULT_IMG_SIZE = 640 //224
+
+export async function getImageTensorFromPath(path: string, dims: number[] =  [1, 3, DEFAULT_IMG_SIZE, DEFAULT_IMG_SIZE]): Promise<Tensor> {
+  // 1. load the image  
+  var image = await loadImageFromPath(path, dims[2], dims[3]);
+  // 2. convert to tensor
+  var imageTensor = imageDataToTensor(image, dims);
+  // 3. return the tensor
+  return imageTensor;
+}
+
+async function loadImageFromPath(path: string, width: number = DEFAULT_IMG_SIZE, height: number= DEFAULT_IMG_SIZE): Promise<Jimp> {
+  // Use Jimp to load the image and resize it.
+  var imageData = await Jimp.default.read(path).then((imageBuffer: Jimp) => {
+    return imageBuffer.resize(width, height);
+  });
+
+  return imageData;
+}
+
+function imageDataToTensor(image: Jimp, dims: number[]): Tensor {
+  // 1. Get buffer data from image and create R, G, and B arrays.
+  var imageBufferData = image.bitmap.data;
+  const [redArray, greenArray, blueArray] = new Array(new Array<number>(), new Array<number>(), new Array<number>());
+
+  // 2. Loop through the image buffer and extract the R, G, and B channels
+  for (let i = 0; i < imageBufferData.length; i += 4) {
+    redArray.push(imageBufferData[i]);
+    greenArray.push(imageBufferData[i + 1]);
+    blueArray.push(imageBufferData[i + 2]);
+    // skip data[i + 3] to filter out the alpha channel
+  }
+
+  // 3. Concatenate RGB to transpose [DEFAULT_IMG_SIZE, DEFAULT_IMG_SIZE, 3] -> [3, DEFAULT_IMG_SIZE, DEFAULT_IMG_SIZE] to a number array
+  const transposedData = redArray.concat(greenArray).concat(blueArray);
+
+  // 4. convert to float32
+  let i, l = transposedData.length; // length, we need this for the loop
+  // create the Float32Array size 3 * DEFAULT_IMG_SIZE * DEFAULT_IMG_SIZE for these dimensions output
+  const float32Data = new Float32Array(dims[1] * dims[2] * dims[3]);
+  for (i = 0; i < l; i++) {
+    float32Data[i] = transposedData[i] / 255.0; // convert to float
+  }
+  // 5. create the tensor object from onnxruntime-web.
+  const inputTensor = new Tensor("float32", float32Data, dims);
+  return inputTensor;
+}
+
+
